@@ -50,6 +50,8 @@ jobs:
           KEY: ${{ secrets.HORIZON_SIM_DATA_KEY }}
         run: |
           if [ -z "$KEY" ]; then echo "No HORIZON_SIM_DATA_KEY: no IPA with game files"; exit 0; fi
+          # The small IPA too: once the one with files has run, the files stay in Documents.
+          gh release upload sim-data target/ios/Horizon.ipa --clobber -R "$GITHUB_REPOSITORY"
           gh release download sim-data -R "$GITHUB_REPOSITORY" -p sim-data.bin -D "$RUNNER_TEMP"
           printf %s "$KEY" > "$RUNNER_TEMP/key"
           openssl enc -d -aes-256-cbc -pbkdf2 -in "$RUNNER_TEMP/sim-data.bin" -pass file:"$RUNNER_TEMP/key"             | tar -xz -C "$RUNNER_TEMP"

@@ -22,9 +22,10 @@ pub fn launch_args() -> Vec<String> {
         "--fullscreen".to_owned(),
     ];
     // The resources put in Documents, else those built into the app (the owner's IPA,
-    // ios.yml). Without either the game says where to put them (no_resources.rs).
+    // ios.yml), copied to Documents so that later IPAs without them find them still.
+    // Without either the game says where to put them (no_resources.rs).
     let resources = find_resources(&docs, 4)
-        .or_else(bundled_resources)
+        .or_else(|| bundled_resources().map(|b| keep(&b, &docs).unwrap_or(b)))
         .unwrap_or_else(|| docs.join("resources"));
     args.extend(["--resources".to_owned(), resources.display().to_string()]);
     // A session the launcher wrote (online-mode servers); the game reads it once and deletes it.
@@ -43,6 +44,32 @@ pub fn launch_args() -> Vec<String> {
 fn bundled_resources() -> Option<PathBuf> {
     let dir = std::env::current_exe().ok()?.parent()?.join("resources");
     dir.join("horizon-resources.json").is_file().then_some(dir)
+}
+
+/// Copies the bundled resources `from` to `docs/resources`, whole or not at all.
+/// On APFS each file is a clone of the bundle's, so this takes no time or space.
+fn keep(from: &Path, docs: &Path) -> std::io::Result<PathBuf> {
+    let partial = docs.join("resources.partial");
+    let _ = std::fs::remove_dir_all(&partial);
+    copy_dir(from, &partial)?;
+    let to = docs.join("resources");
+    let _ = std::fs::remove_dir_all(&to);
+    std::fs::rename(&partial, &to)?;
+    Ok(to)
+}
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
 }
 
 /// The first folder under `dir`, `depth` levels down at most, holding a
@@ -86,6 +113,26 @@ mod tests {
         std::fs::write(deep.join("horizon-resources.json"), "{}").unwrap();
         assert_eq!(find_resources(&root, 4), Some(deep.clone()));
         assert_eq!(find_resources(&root, 1), None);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn keeps_a_copy_in_documents() {
+        let root = std::env::temp_dir().join(format!("horizon-ios-keep-{}", std::process::id()));
+        let bundle = root.join("Horizon.app/resources");
+        std::fs::create_dir_all(bundle.join("assets")).unwrap();
+        std::fs::write(bundle.join("horizon-resources.json"), "{}").unwrap();
+        std::fs::write(bundle.join("assets/a.bin"), "a").unwrap();
+        let docs = root.join("Documents");
+        std::fs::create_dir_all(docs.join("resources.partial")).unwrap();
+        let kept = keep(&bundle, &docs).unwrap();
+        assert_eq!(kept, docs.join("resources"));
+        assert_eq!(find_resources(&docs, 4), Some(kept.clone()));
+        assert_eq!(
+            std::fs::read_to_string(kept.join("assets/a.bin")).unwrap(),
+            "a"
+        );
+        assert!(!docs.join("resources.partial").exists());
         std::fs::remove_dir_all(&root).unwrap();
     }
 }
