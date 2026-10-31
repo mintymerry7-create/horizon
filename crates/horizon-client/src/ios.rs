@@ -29,6 +29,10 @@ pub fn launch_args() -> Vec<String> {
     if session.is_file() {
         args.extend(["--session-file".to_owned(), session.display().to_string()]);
     }
+    // More options for a test run in the Simulator (ios/sim-test.sh passes them through simctl).
+    if let Ok(extra) = std::env::var("HORIZON_IOS_ARGS") {
+        args.extend(extra.split_whitespace().map(str::to_owned));
+    }
     args
 }
 

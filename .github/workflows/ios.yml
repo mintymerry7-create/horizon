@@ -39,6 +39,49 @@ jobs:
           name: Horizon-ipa
           path: target/ios/Horizon.ipa
           if-no-files-found: error
+  simulator:
+    # The same game in the iOS Simulator: screenshots and logs of the missing-files screen, and with the
+    # encrypted resources of the sim-data draft release, the title screen and a new world (ios/sim-test.sh).
+    runs-on: macos-15
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios-sim
+      - name: Build for the Simulator
+        run: bash ios/build-app.sh aarch64-apple-ios-sim fast
+      - name: Resources (encrypted draft release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEY: ${{ secrets.HORIZON_SIM_DATA_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then echo "No HORIZON_SIM_DATA_KEY: the run tests the missing-files screen only"; exit 0; fi
+          gh release download sim-data -R "$GITHUB_REPOSITORY" -p sim-data.bin -D "$RUNNER_TEMP"
+          printf %s "$KEY" > "$RUNNER_TEMP/key"
+          openssl enc -d -aes-256-cbc -pbkdf2 -in "$RUNNER_TEMP/sim-data.bin" -pass file:"$RUNNER_TEMP/key"             | tar -xz -C "$RUNNER_TEMP"
+          rm "$RUNNER_TEMP/key" "$RUNNER_TEMP/sim-data.bin"
+          echo "RES=$RUNNER_TEMP/26.3" >> "$GITHUB_ENV"
+      - name: Run in the Simulator
+        run: bash ios/sim-test.sh target/ios/aarch64-apple-ios-sim/Payload/Horizon.app "$RUNNER_TEMP/sim" "${RES:-}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          # Screenshots and logs only: never the resources.
+          name: simulator
+          path: |
+            ${{ runner.temp }}/sim/*.png
+            ${{ runner.temp }}/sim/*.log
+            ${{ runner.temp }}/sim/*.json
+            ${{ runner.temp }}/sim/*.ips
+            ${{ runner.temp }}/sim/*-crash-reports
   publish:
     needs: ipa
     if: github.event_name == 'workflow_dispatch' && inputs.release
