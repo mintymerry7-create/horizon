@@ -2074,6 +2074,9 @@ struct Game<'a> {
     pad: pad::Pads,
     /// Touch controls (touch.rs).
     touch: touch::TouchState,
+    /// The app is in the background (iOS, Android): no frames, since iOS stops an app that
+    /// sends the GPU work from there.
+    backgrounded: bool,
     frames: u64,
     /// The glint clock and options, read once at the start of each frame
     /// (game/item_draw.rs).
@@ -15177,6 +15180,7 @@ impl Game<'_> {
 }
 impl ApplicationHandler for Game<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        self.backgrounded = false;
         if self.window.is_some() {
             return;
         }
@@ -15244,6 +15248,9 @@ impl ApplicationHandler for Game<'_> {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.idle(event_loop);
     }
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        self.backgrounded = true;
+    }
     /// The application is ending. On macOS, Quit (Cmd+Q) ends it through
     /// applicationWillTerminate without a CloseRequested; vanilla's GLFW
     /// window turns it into a window close, so Minecraft.stop saves the world.
@@ -15271,6 +15278,9 @@ impl Game<'_> {
             return;
         }
         follow_keymap(&mut event);
+        if self.backgrounded && matches!(event, WindowEvent::RedrawRequested) {
+            return;
+        }
         // A touch screen: touch.rs makes the keyboard and mouse input of it.
         if touch::ENABLED
             && let WindowEvent::Touch(t) = event
@@ -16527,6 +16537,12 @@ impl Game<'_> {
             event_loop.exit();
             return;
         }
+        if self.backgrounded && !self.options.offscreen {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(100),
+            ));
+            return;
+        }
         if let Some(w) = &self.window {
             if self.options.offscreen {
                 // Offscreen frames don't wait for the window to be drawn: an
@@ -16713,6 +16729,7 @@ impl<'a> Game<'a> {
             last_input: now,
             pad: Default::default(),
             touch: Default::default(),
+            backgrounded: false,
             frames: 0,
             glint_frame: Default::default(),
             item_level_cache: Default::default(),
@@ -18761,6 +18778,11 @@ impl ApplicationHandler for App {
     fn device_event(&mut self, event_loop: &ActiveEventLoop, id: DeviceId, event: DeviceEvent) {
         if let App::Ready(game) = self {
             game.device_event(event_loop, id, event);
+        }
+    }
+    fn suspended(&mut self, event_loop: &ActiveEventLoop) {
+        if let App::Ready(game) = self {
+            game.suspended(event_loop);
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {

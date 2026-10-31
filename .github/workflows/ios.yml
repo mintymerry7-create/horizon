@@ -9,6 +9,7 @@ on:
         type: boolean
         default: true
   push:
+    branches: ["**"]
     paths:
       - 'ios/**'
       - 'crates/**'
