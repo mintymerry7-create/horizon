@@ -36,7 +36,8 @@ echo "Documents: $DOCS"
 
 # limit SECONDS COMMAND...: macOS has no timeout(1). A hung simctl call must not hang the run.
 limit() { perl -e 'alarm shift; exec @ARGV' "$@"; }
-running() { limit 15 xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -q "$BUNDLE"; }
+# Simulator apps are processes of the Mac: much quicker to find than through launchctl in the Simulator.
+running() { pgrep -f "Horizon.app/horizon-client" >/dev/null; }
 
 # run NAME SECONDS [game options...]: launch, screenshot every 10 s while it runs, then collect.
 run() {
