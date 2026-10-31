@@ -15198,8 +15198,7 @@ impl ApplicationHandler for Game<'_> {
         );
         // `--offscreen` renders into a texture: its window would only show white.
         let window = match event_loop.create_window(
-            attributes
-                .with_inner_size(winit::dpi::LogicalSize::new(size[0], size[1]))
+            horizon_client::window::with_size(attributes, size[0].into(), size[1].into())
                 .with_fullscreen(fullscreen.then_some(winit::window::Fullscreen::Borderless(None)))
                 .with_visible(!self.options.offscreen),
         ) {
@@ -18515,8 +18514,7 @@ impl Loading {
         );
         // `--offscreen` renders into a texture: its window would only show white.
         let window = match event_loop.create_window(
-            attributes
-                .with_inner_size(winit::dpi::LogicalSize::new(size[0], size[1]))
+            horizon_client::window::with_size(attributes, size[0].into(), size[1].into())
                 .with_fullscreen(fullscreen.then_some(winit::window::Fullscreen::Borderless(None)))
                 .with_visible(!self.options.as_ref().is_some_and(|o| o.offscreen)),
         ) {

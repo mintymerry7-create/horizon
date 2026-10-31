@@ -34,16 +34,18 @@ DOCS="$(xcrun simctl get_app_container "$UDID" "$BUNDLE" data)/Documents"
 mkdir -p "$DOCS"
 echo "Documents: $DOCS"
 
-running() { xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -q "$BUNDLE"; }
+# limit SECONDS COMMAND...: macOS has no timeout(1). A hung simctl call must not hang the run.
+limit() { perl -e 'alarm shift; exec @ARGV' "$@"; }
+running() { limit 15 xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -q "$BUNDLE"; }
 
 # run NAME SECONDS [game options...]: launch, screenshot every 10 s while it runs, then collect.
 run() {
   local name=$1 secs=$2
   shift 2
   echo "== $name: up to ${secs}s, options: $*"
-  xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null
+  limit 30 xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null
   rm -rf "$DOCS/logs" "$DOCS/crash-reports"
-  SIMCTL_CHILD_HORIZON_IOS_ARGS="$*" xcrun simctl launch --terminate-running-process \
+  SIMCTL_CHILD_HORIZON_IOS_ARGS="$*" limit 60 xcrun simctl launch --terminate-running-process \
     --stdout="$OUT/$name.stdout.log" --stderr="$OUT/$name.stderr.log" "$UDID" "$BUNDLE"
   local t=0
   while [ "$t" -lt "$secs" ]; do
@@ -53,10 +55,12 @@ run() {
       echo "   the app ended after about ${t}s"
       break
     fi
-    xcrun simctl io "$UDID" screenshot "$OUT/$name-$(printf %03d "$t")s.png" >/dev/null 2>&1
+    limit 30 xcrun simctl io "$UDID" screenshot "$OUT/$name-$(printf %03d "$t")s.png" >/dev/null 2>&1
+    # The log so far, in case the run never gets to the end.
+    cp "$DOCS/logs/latest.log" "$OUT/$name.latest.log" 2>/dev/null
   done
   running && echo "   still running at ${secs}s"
-  xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null
+  limit 30 xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null
   cp "$DOCS/logs/latest.log" "$OUT/$name.latest.log" 2>/dev/null
   cp -R "$DOCS/crash-reports" "$OUT/$name-crash-reports" 2>/dev/null
   tail -25 "$OUT/$name.latest.log" 2>/dev/null

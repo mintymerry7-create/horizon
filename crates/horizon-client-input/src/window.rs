@@ -545,6 +545,21 @@ pub fn fullscreen_request(
     }
 }
 
+/// `attributes` asking for a window of `width` x `height` logical pixels. Not on iOS, where
+/// winit gives the UIWindow that size instead of the screen's and the rest of the frame
+/// falls off the screen: there the window fills the screen.
+pub fn with_size(
+    attributes: winit::window::WindowAttributes,
+    width: f64,
+    height: f64,
+) -> winit::window::WindowAttributes {
+    if cfg!(target_os = "ios") {
+        attributes
+    } else {
+        attributes.with_inner_size(winit::dpi::LogicalSize::new(width, height))
+    }
+}
+
 /// Horizon's icon for the window's title bar and the task bar (X11 and Windows; Wayland takes
 /// it from the `horizon.desktop` entry, macOS from the app bundle). `None` if it can't be read.
 pub fn icon() -> Option<winit::window::Icon> {

@@ -71,6 +71,7 @@ jobs:
           rm "$RUNNER_TEMP/key" "$RUNNER_TEMP/sim-data.bin"
           echo "RES=$RUNNER_TEMP/26.3" >> "$GITHUB_ENV"
       - name: Run in the Simulator
+        timeout-minutes: 25
         run: bash ios/sim-test.sh target/ios/aarch64-apple-ios-sim/Payload/Horizon.app "$RUNNER_TEMP/sim" "${RES:-}"
       - uses: actions/upload-artifact@v4
         if: always()
