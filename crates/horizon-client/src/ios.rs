@@ -21,8 +21,11 @@ pub fn launch_args() -> Vec<String> {
         docs.display().to_string(),
         "--fullscreen".to_owned(),
     ];
-    // Without resources the game says where to put them (no_resources.rs).
-    let resources = find_resources(&docs, 4).unwrap_or_else(|| docs.join("resources"));
+    // The resources put in Documents, else those built into the app (the owner's IPA,
+    // ios.yml). Without either the game says where to put them (no_resources.rs).
+    let resources = find_resources(&docs, 4)
+        .or_else(bundled_resources)
+        .unwrap_or_else(|| docs.join("resources"));
     args.extend(["--resources".to_owned(), resources.display().to_string()]);
     // A session the launcher wrote (online-mode servers); the game reads it once and deletes it.
     let session = docs.join("session.json");
@@ -34,6 +37,12 @@ pub fn launch_args() -> Vec<String> {
         args.extend(extra.split_whitespace().map(str::to_owned));
     }
     args
+}
+
+/// The prepared resources inside the app bundle, next to the executable.
+fn bundled_resources() -> Option<PathBuf> {
+    let dir = std::env::current_exe().ok()?.parent()?.join("resources");
+    dir.join("horizon-resources.json").is_file().then_some(dir)
 }
 
 /// The first folder under `dir`, `depth` levels down at most, holding a
