@@ -43,6 +43,11 @@ pub fn data_dir() -> PathBuf {
         if let Some(h) = &home {
             return h.join("Library/Application Support");
         }
+    } else if cfg!(target_os = "ios") {
+        // The app's Documents folder, which the Files app shows (UIFileSharingEnabled).
+        if let Some(h) = &home {
+            return h.join("Documents");
+        }
     } else if let Some(d) = env("XDG_DATA_HOME") {
         return d;
     } else if let Some(h) = &home {

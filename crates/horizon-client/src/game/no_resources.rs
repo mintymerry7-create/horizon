@@ -150,6 +150,11 @@ impl ApplicationHandler for Missing {
                 button: MouseButton::Left,
                 ..
             } => self.click(event_loop),
+            // A touch screen (iOS): a tap is a click where the finger lifts.
+            WindowEvent::Touch(t) if t.phase == winit::event::TouchPhase::Ended => {
+                self.pointer = (t.location.x, t.location.y);
+                self.click(event_loop);
+            }
             WindowEvent::KeyboardInput { event, .. }
                 if event.state == ElementState::Pressed
                     && event.physical_key == PhysicalKey::Code(KeyCode::Escape) =>

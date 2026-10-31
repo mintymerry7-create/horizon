@@ -1,6 +1,7 @@
 //! Horizon: native Rust client for Minecraft Java Edition 26.3 gameplay.
 #![forbid(unsafe_code)]
 mod game;
+mod ios;
 
 use horizon_client::{crash, logging};
 
@@ -16,7 +17,7 @@ fn main() {
     horizon_threads::configure_allocator();
     std::hint::black_box(&MOD_API_LEVEL);
     horizon_client::telemetry::mark_start();
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args = args();
     let game_args = args.iter().take_while(|a| *a != "--dedicated");
     let help = game_args
         .clone()
@@ -67,6 +68,16 @@ fn main() {
         });
     }
     logging::flush();
+}
+
+/// The command line after the program's name. iOS starts apps without one: there it is
+/// the one ios.rs makes.
+fn args() -> Vec<String> {
+    if cfg!(target_os = "ios") {
+        ios::launch_args()
+    } else {
+        std::env::args().skip(1).collect()
+    }
 }
 
 /// The JVM raises its open-file limit to the hard limit as it starts

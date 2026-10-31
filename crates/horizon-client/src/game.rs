@@ -283,6 +283,7 @@ mod text_displays;
 mod titles;
 mod tnt;
 mod totem;
+mod touch;
 mod trading;
 mod transient_blocks;
 mod trial_spawner;
@@ -465,7 +466,7 @@ impl Options {
     /// The command line, then what it asks of the process: the game folder, the account.
     /// A bad command line is a [`launch_api::UsageError`] (exit code 2, no crash report).
     fn read() -> Result<Option<Self>> {
-        let Some(mut o) = Self::parse(std::env::args().skip(1))
+        let Some(mut o) = Self::parse(crate::args().into_iter())
             .map_err(|e| launch_api::UsageError(e.to_string()))?
         else {
             return Ok(None);
@@ -2071,6 +2072,8 @@ struct Game<'a> {
     last_input: Instant,
     /// Controllers (Horizon's own).
     pad: pad::Pads,
+    /// Touch controls (touch.rs).
+    touch: touch::TouchState,
     frames: u64,
     /// The glint clock and options, read once at the start of each frame
     /// (game/item_draw.rs).
@@ -7270,7 +7273,8 @@ impl Game<'_> {
         };
         let scale = HudBatch::new(size).scale;
         let was_grabbed = self.captured;
-        if self.options.offscreen {
+        // iOS has no pointer to grab: touches turn the view (touch.rs), so the grab is the game's own.
+        if self.options.offscreen || cfg!(target_os = "ios") {
             // `--offscreen` shows no window: the system pointer stays where the
             // person at the computer has it, and the grab is the game's own (an
             // agent turns the view with `mouse-move`).
@@ -7514,6 +7518,7 @@ impl Game<'_> {
         self.draw_debug_overlay(&mut batch, size);
         self.frame_graph
             .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
+        self.draw_touch(&mut batch);
         self.draw_pad_cursor(&mut batch);
         self.resolve_inline_profiles(&batch.inline_profiles);
         batch
@@ -15266,6 +15271,13 @@ impl Game<'_> {
             return;
         }
         follow_keymap(&mut event);
+        // A touch screen: touch.rs makes the keyboard and mouse input of it.
+        if touch::ENABLED
+            && let WindowEvent::Touch(t) = event
+        {
+            self.touch_event(event_loop, id, t);
+            return;
+        }
         // MacosUtil.setCtrlClickEmulatesRightClick: Control + left click is a right click.
         if let WindowEvent::MouseInput { state, button, .. } = &mut event
             && *button == MouseButton::Left
@@ -16700,6 +16712,7 @@ impl<'a> Game<'a> {
             previous: now,
             last_input: now,
             pad: Default::default(),
+            touch: Default::default(),
             frames: 0,
             glint_frame: Default::default(),
             item_level_cache: Default::default(),

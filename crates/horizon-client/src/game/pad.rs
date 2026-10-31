@@ -100,6 +100,7 @@ impl Pads {
 impl Game<'_> {
     /// Once per loop iteration: read the pads and act on button changes.
     pub(super) fn poll_pads(&mut self, event_loop: &dyn EventLoopCtl) {
+        self.touch_frame();
         let settings = &self.settings.controller;
         if !settings.enabled {
             self.pad_output_off();
@@ -276,6 +277,10 @@ impl Game<'_> {
 
     /// The left stick as the move vector, while playing.
     pub(super) fn pad_move(&self) -> Option<[f32; 2]> {
+        // The touch stick moves like a left stick (touch.rs).
+        if let Some(v) = self.touch_move() {
+            return Some(v);
+        }
         let settings = &self.settings.controller;
         if !settings.enabled || self.pad_in_menu() || !self.pad_focused() {
             return None;

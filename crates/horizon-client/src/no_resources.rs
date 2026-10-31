@@ -7,13 +7,22 @@ use crate::ui_theme::{self, Face, Ui, color};
 /// The launcher's download page.
 pub const DOWNLOAD_URL: &str = "https://playhorizon.dev";
 
+#[cfg(not(target_os = "ios"))]
 const TITLE: &str = "Start Horizon from the launcher";
+#[cfg(not(target_os = "ios"))]
 const PARAGRAPHS: [&str; 3] = [
-    "This is the game the Horizon launcher installs and starts. On its own it has none of \
-     Minecraft's files, so it can't start.",
-    "Horizon needs your own copy of Minecraft: Java Edition. The launcher signs you in and \
-     prepares the game files from it.",
+    "This is the game the Horizon launcher installs and starts. On its own it has none of      Minecraft's files, so it can't start.",
+    "Horizon needs your own copy of Minecraft: Java Edition. The launcher signs you in and      prepares the game files from it.",
     "Download the launcher at playhorizon.dev, then press Play there.",
+];
+// iOS can't run the preparer (it calls Mojang's Java code): the files come from a computer.
+#[cfg(target_os = "ios")]
+const TITLE: &str = "Add your game files";
+#[cfg(target_os = "ios")]
+const PARAGRAPHS: [&str; 3] = [
+    "Horizon needs your own copy of Minecraft: Java Edition, prepared by the Horizon launcher      on a computer: press Play there once.",
+    "Zip the prepared folder (horizon-client/26.3, with its horizon-resources.json), put the      zip in Files, On My iPhone, Horizon, and tap it there to unzip it.",
+    "Then open Horizon again: it finds the folder by itself.",
 ];
 const COLUMN: f32 = 560.0;
 const BUTTON_GAP: f32 = 12.0;

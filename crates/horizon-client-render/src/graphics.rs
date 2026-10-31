@@ -156,7 +156,7 @@ impl GraphicsApi {
         const MACOS: [GraphicsApi; 1] = [GraphicsApi::Auto];
         if cfg!(windows) {
             &WINDOWS
-        } else if cfg!(target_os = "macos") {
+        } else if cfg!(target_vendor = "apple") {
             &MACOS
         } else {
             &LINUX

@@ -143,6 +143,11 @@ const SYMBOLS: [Row; 5] = [
     BOTTOM,
 ];
 
+/// A key's width unit, the gap between keys and a key's height, in dp.
+const UNIT: f32 = 50.0;
+const GAP: f32 = 6.0;
+const KEY_H: f32 = 38.0;
+
 /// The keyboard's state while open.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Keyboard {
@@ -266,16 +271,44 @@ impl Keyboard {
         }
     }
 
+    /// The keyboard's top left key corner and its plate's height in a `w` x `h` dp screen
+    /// (`draw`'s layout).
+    fn origin(w: f32, h: f32, at_top: bool) -> (f32, f32, f32) {
+        let width = 10.0 * UNIT + 9.0 * GAP;
+        let height = 5.0 * KEY_H + 4.0 * GAP + 24.0 + 30.0;
+        let x0 = ((w - width) / 2.0).round();
+        let y0 = if at_top { 16.0 } else { h - height - 16.0 };
+        (x0, y0, height)
+    }
+    /// Whether `point` (dp) is on the keyboard's plate, keys or not.
+    pub fn covers(w: f32, h: f32, at_top: bool, (px, py): (f32, f32)) -> bool {
+        let (x0, y0, height) = Self::origin(w, h, at_top);
+        let width = 10.0 * UNIT + 9.0 * GAP;
+        px >= x0 - 12.0 && px < x0 + width + 12.0 && py >= y0 - 12.0 && py < y0 - 12.0 + height
+    }
+    /// A touch at `point` (dp): the key there takes the focus and is pressed.
+    pub fn tap(&mut self, w: f32, h: f32, at_top: bool, (px, py): (f32, f32)) -> Option<Output> {
+        let (x0, y0, _) = Self::origin(w, h, at_top);
+        let r = ((py - y0) / (KEY_H + GAP)).floor();
+        if r < 0.0 || r >= 5.0 || py - y0 - r * (KEY_H + GAP) > KEY_H {
+            return None;
+        }
+        let row = self.rows()[r as usize];
+        let col = (0..row.len()).find(|&i| {
+            let (left, units) = Self::span(row, i);
+            let x = x0 + left * (UNIT + GAP);
+            px >= x && px < x + units * UNIT + (units - 1.0) * GAP
+        })?;
+        self.row = r as usize;
+        self.col = col;
+        self.press()
+    }
+
     /// Draw the keyboard across the bottom of the screen, or the top when
     /// the field it types into is in the lower half.
     pub fn draw(&self, ui: &mut Ui, at_top: bool, glyphs: GlyphStyle) {
-        const UNIT: f32 = 50.0;
-        const GAP: f32 = 6.0;
-        const KEY_H: f32 = 38.0;
         let width = 10.0 * UNIT + 9.0 * GAP;
-        let height = 5.0 * KEY_H + 4.0 * GAP + 24.0 + 30.0;
-        let x0 = ((ui.w - width) / 2.0).round();
-        let y0 = if at_top { 16.0 } else { ui.h - height - 16.0 };
+        let (x0, y0, height) = Self::origin(ui.w, ui.h, at_top);
         ui.rounded(
             x0 - 12.0,
             y0 - 12.0,

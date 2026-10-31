@@ -1,0 +1,61 @@
+name: ios
+# The unsigned iOS app (ios/build-ipa.sh): an artifact of every run, and the `ios-latest` prerelease when run by
+# hand with `release` on. docs/ios.md.
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Publish the IPA as the ios-latest prerelease
+        type: boolean
+        default: true
+  push:
+    paths:
+      - 'ios/**'
+      - 'crates/**'
+      - 'Cargo.lock'
+      - '.github/workflows/ios.yml'
+permissions:
+  contents: read
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios
+      - name: Build Horizon.ipa
+        env:
+          HORIZON_IOS_BUILD: ${{ github.run_number }}
+        run: bash ios/build-ipa.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Horizon-ipa
+          path: target/ios/Horizon.ipa
+          if-no-files-found: error
+  publish:
+    needs: ipa
+    if: github.event_name == 'workflow_dispatch' && inputs.release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Horizon-ipa
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ios-latest
+          name: Horizon for iOS (unsigned)
+          prerelease: true
+          make_latest: false
+          files: Horizon.ipa
+          body: |
+            Unsigned IPA of Horizon for iPhone and iPad (iOS 15+), from ${{ github.sha }}.
+            Sign and install it with Sideloadly, AltStore or TrollStore, then follow docs/ios.md for the game files.

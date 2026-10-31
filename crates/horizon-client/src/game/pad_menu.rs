@@ -1265,7 +1265,7 @@ impl Game<'_> {
     /// A text field has keyboard focus: chat, a sign, a book being written,
     /// a search box, the anvil's name, the title screens' and the options'
     /// fields, the LAN port.
-    fn pad_typing(&self) -> bool {
+    pub(super) fn pad_typing(&self) -> bool {
         (self.screen == Screen::Chat && self.title.is_none())
             || self.sign_edit.is_some()
             || matches!(self.book, Some(super::books::BookScreen::Edit { .. }))
@@ -1311,7 +1311,7 @@ impl Game<'_> {
 
     /// What a key of the on-screen keyboard does: the same as a typed key in
     /// the field that has focus.
-    fn pad_osk_output(&mut self, out: osk::Output) {
+    pub(super) fn pad_osk_output(&mut self, out: osk::Output) {
         use osk::Output;
         let (key, text) = match &out {
             Output::Text(t) => (None, Some(t.as_str())),
@@ -1392,12 +1392,7 @@ impl Game<'_> {
             return;
         }
         if let Some(keyboard) = &self.pad.menu.osk {
-            let at_top = self
-                .pad
-                .menu
-                .focus
-                .is_some_and(|f| f.center().1 > batch.height / 2.0)
-                || self.screen == Screen::Chat;
+            let at_top = self.osk_at_top(batch.height);
             let mut ui = horizon_client::ui_theme::Ui::new(&self.gui.atlas, batch, self.cursor);
             keyboard.draw(&mut ui, at_top, self.ui.options.pad_style);
             ui.finish();
@@ -1439,6 +1434,16 @@ impl Game<'_> {
                 rgba(255, 255, 255, 255),
             );
         }
+    }
+
+    /// The on-screen keyboard goes to the top when the field it types into is
+    /// in the lower half of a `gui_height` tall screen (and for chat).
+    pub(super) fn osk_at_top(&self, gui_height: f32) -> bool {
+        self.pad
+            .menu
+            .focus
+            .is_some_and(|f| f.center().1 > gui_height / 2.0)
+            || self.screen == Screen::Chat
     }
 
     /// The focus highlight, as vanilla's keyboard focus looks: buttons,
