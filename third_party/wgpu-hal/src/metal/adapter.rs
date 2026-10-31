@@ -575,11 +575,6 @@ const INDIRECT_DRAW_DISPATCH_SUPPORT: &[MTLFeatureSet] = &[
     MTLFeatureSet::macOS_GPUFamily1_v1,
 ];
 
-/// "Base vertex/instance drawing" in the Metal feature set tables
-///
-/// in our terms, `base_vertex` and `first_instance` must be 0
-const BASE_VERTEX_FIRST_INSTANCE_SUPPORT: &[MTLFeatureSet] = INDIRECT_DRAW_DISPATCH_SUPPORT;
-
 const TEXTURE_CUBE_ARRAY_SUPPORT: &[MTLFeatureSet] = &[
     MTLFeatureSet::iOS_GPUFamily4_v1,
     MTLFeatureSet::tvOS_GPUFamily1_v2,
@@ -730,6 +725,14 @@ impl super::CapabilitiesQuery {
             MTLLanguageVersion::Version1_0
         };
 
+        // The iOS Simulator answers no to every legacy feature set, though its GPU
+        // draws indirectly: ask the GPU families as well.
+        let indirect_draw_dispatch = Self::supports_any(device, INDIRECT_DRAW_DISPATCH_SUPPORT)
+            || (family_check
+                && (device.supportsFamily(MTLGPUFamily::Apple3)
+                    || device.supportsFamily(MTLGPUFamily::Mac2)
+                    || device.supportsFamily(MTLGPUFamily::Metal3)));
+
         Self {
             msl_version,
             // macOS 10.11 doesn't support read-write resources
@@ -746,11 +749,8 @@ impl super::CapabilitiesQuery {
                 MUTABLE_COMPARISON_SAMPLER_SUPPORT,
             ),
             sampler_clamp_to_border: Self::supports_any(device, SAMPLER_CLAMP_TO_BORDER_SUPPORT),
-            indirect_draw_dispatch: Self::supports_any(device, INDIRECT_DRAW_DISPATCH_SUPPORT),
-            base_vertex_first_instance_drawing: Self::supports_any(
-                device,
-                BASE_VERTEX_FIRST_INSTANCE_SUPPORT,
-            ),
+            indirect_draw_dispatch,
+            base_vertex_first_instance_drawing: indirect_draw_dispatch,
             dual_source_blending: Self::supports_any(device, DUAL_SOURCE_BLEND_SUPPORT),
             low_power: os_type != super::OsType::Macos || device.isLowPower(),
             headless: os_type == super::OsType::Macos && device.isHeadless(),
