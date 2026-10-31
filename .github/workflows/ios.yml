@@ -57,9 +57,11 @@ jobs:
           openssl enc -d -aes-256-cbc -pbkdf2 -in "$RUNNER_TEMP/sim-data.bin" -pass file:"$RUNNER_TEMP/key"             | tar -xz -C "$RUNNER_TEMP"
           rm "$RUNNER_TEMP/key" "$RUNNER_TEMP/sim-data.bin"
           app=target/ios/aarch64-apple-ios/Payload/Horizon.app
-          mv "$RUNNER_TEMP/26.3" "$app/resources"
+          # One stored zip, not 28,000 files: signers and the installer check each file of the bundle.
+          (cd "$RUNNER_TEMP/26.3" && zip -qr0 "$OLDPWD/$app/resources.zip" .)
+          rm -rf "$RUNNER_TEMP/26.3"
           (cd target/ios/aarch64-apple-ios && zip -qry "$RUNNER_TEMP/Horizon-with-files.ipa" Payload)
-          rm -rf "$app/resources"
+          rm "$app/resources.zip"
           gh release upload sim-data "$RUNNER_TEMP/Horizon-with-files.ipa" --clobber -R "$GITHUB_REPOSITORY"
           ls -lh "$RUNNER_TEMP/Horizon-with-files.ipa"
   simulator:

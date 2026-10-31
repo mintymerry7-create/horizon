@@ -71,8 +71,11 @@ run() {
 run missing-files 30
 
 if [ -n "$RES" ]; then
-  cp -R "$RES" "$DOCS/resources"
-  run title 60
+  # As in the owner's IPA (ios.yml): one zip in the bundle, which the game unzips to Documents.
+  (cd "$RES" && zip -qr0 "$OLDPWD/$APP/resources.zip" .)
+  codesign --force --sign - "$APP"
+  xcrun simctl install "$UDID" "$APP"
+  run title 90
   run world 300 --world smoke --seed 1 --render-distance 4 --world-frames 1500 --timeout-seconds 280 \
     --smoke-report "$DOCS/smoke.json"
   cp "$DOCS/smoke.json" "$OUT/smoke.json" 2>/dev/null && cat "$OUT/smoke.json"

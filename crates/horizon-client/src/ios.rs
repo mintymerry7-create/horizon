@@ -25,7 +25,7 @@ pub fn launch_args() -> Vec<String> {
     // ios.yml), copied to Documents so that later IPAs without them find them still.
     // Without either the game says where to put them (no_resources.rs).
     let resources = find_resources(&docs, 4)
-        .or_else(|| bundled_resources().map(|b| keep(&b, &docs).unwrap_or(b)))
+        .or_else(|| keep(&bundled_archive()?, &docs).ok())
         .unwrap_or_else(|| docs.join("resources"));
     args.extend(["--resources".to_owned(), resources.display().to_string()]);
     // A session the launcher wrote (online-mode servers); the game reads it once and deletes it.
@@ -40,36 +40,34 @@ pub fn launch_args() -> Vec<String> {
     args
 }
 
-/// The prepared resources inside the app bundle, next to the executable.
-fn bundled_resources() -> Option<PathBuf> {
-    let dir = std::env::current_exe().ok()?.parent()?.join("resources");
-    dir.join("horizon-resources.json").is_file().then_some(dir)
+/// The prepared resources inside the app bundle, next to the executable: one
+/// zip, since signing and installing an app checks every file of the bundle
+/// and 28,000 of them stall the installer.
+fn bundled_archive() -> Option<PathBuf> {
+    let zip = std::env::current_exe()
+        .ok()?
+        .parent()?
+        .join("resources.zip");
+    zip.is_file().then_some(zip)
 }
 
-/// Copies the bundled resources `from` to `docs/resources`, whole or not at all.
-/// On APFS each file is a clone of the bundle's, so this takes no time or space.
-fn keep(from: &Path, docs: &Path) -> std::io::Result<PathBuf> {
+/// Unzips the bundled resources `zip` to `docs/resources`, whole or not at all.
+fn keep(zip: &Path, docs: &Path) -> std::io::Result<PathBuf> {
+    let started = std::time::Instant::now();
     let partial = docs.join("resources.partial");
     let _ = std::fs::remove_dir_all(&partial);
-    copy_dir(from, &partial)?;
+    zip::ZipArchive::new(std::fs::File::open(zip)?)
+        .and_then(|mut archive| archive.extract(&partial))
+        .map_err(std::io::Error::other)?;
     let to = docs.join("resources");
     let _ = std::fs::remove_dir_all(&to);
     std::fs::rename(&partial, &to)?;
+    // Before the game's log starts: stderr.
+    eprintln!(
+        "Horizon: unzipped the bundled resources in {:?}",
+        started.elapsed()
+    );
     Ok(to)
-}
-
-fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
-        let target = to.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir(&entry.path(), &target)?;
-        } else {
-            std::fs::copy(entry.path(), &target)?;
-        }
-    }
-    Ok(())
 }
 
 /// The first folder under `dir`, `depth` levels down at most, holding a
@@ -117,12 +115,18 @@ mod tests {
     }
 
     #[test]
-    fn keeps_a_copy_in_documents() {
+    fn unzips_the_bundled_resources_into_documents() {
+        use std::io::Write;
         let root = std::env::temp_dir().join(format!("horizon-ios-keep-{}", std::process::id()));
-        let bundle = root.join("Horizon.app/resources");
-        std::fs::create_dir_all(bundle.join("assets")).unwrap();
-        std::fs::write(bundle.join("horizon-resources.json"), "{}").unwrap();
-        std::fs::write(bundle.join("assets/a.bin"), "a").unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        let bundle = root.join("resources.zip");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&bundle).unwrap());
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("horizon-resources.json", options).unwrap();
+        zip.write_all(b"{}").unwrap();
+        zip.start_file("assets/a.bin", options).unwrap();
+        zip.write_all(b"a").unwrap();
+        zip.finish().unwrap();
         let docs = root.join("Documents");
         std::fs::create_dir_all(docs.join("resources.partial")).unwrap();
         let kept = keep(&bundle, &docs).unwrap();
