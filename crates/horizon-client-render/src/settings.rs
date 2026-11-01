@@ -823,6 +823,8 @@ pub enum Opt {
     TextureFiltering,
     /// `Options.maxAnisotropyBit`.
     MaxAnisotropy,
+    /// Horizon's performance overlay (`graphics::Settings::overlay`): Off, FPS, FPS and Graph.
+    FpsCounter,
 }
 
 #[cfg(test)]

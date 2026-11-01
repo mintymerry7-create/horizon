@@ -272,6 +272,7 @@ impl Opt {
             // Horizon's own options: vanilla has no keys for them, so they read
             // the namespace the client bundles (assets/horizon/lang).
             Opt::PadEnabled => "horizon.options.controller",
+            Opt::FpsCounter => "horizon.options.fps_counter",
             Opt::PadVibration => "horizon.options.vibration",
             Opt::PadAdaptiveTriggers => "horizon.options.adaptive_triggers",
             Opt::PadLightbar => "horizon.options.lightbar",
@@ -774,6 +775,11 @@ impl Opt {
             Opt::ForceUnicode => on_off(s.force_unicode),
             Opt::JapaneseGlyphs => on_off(s.japanese_glyphs),
             Opt::PadEnabled => on_off(s.controller.enabled),
+            Opt::FpsCounter => match s.horizon.overlay {
+                crate::graphics::Overlay::Off => tr("options.off"),
+                crate::graphics::Overlay::Fps => Text::literal("FPS".to_string()),
+                crate::graphics::Overlay::Graph => tr("horizon.options.fps_counter.graph"),
+            },
             Opt::PadVibration => on_off(s.controller.vibration),
             Opt::PadAdaptiveTriggers => on_off(s.controller.adaptive_triggers),
             Opt::PadInvertX => on_off(s.controller.invert_x),
@@ -1068,6 +1074,14 @@ impl Opt {
             Opt::ForceUnicode => s.force_unicode = !s.force_unicode,
             Opt::JapaneseGlyphs => s.japanese_glyphs = !s.japanese_glyphs,
             Opt::PadEnabled => s.controller.enabled = !s.controller.enabled,
+            Opt::FpsCounter => {
+                use crate::graphics::Overlay::{Fps, Graph, Off};
+                s.horizon.overlay = match (s.horizon.overlay, back) {
+                    (Off, false) | (Graph, true) => Fps,
+                    (Fps, false) | (Off, true) => Graph,
+                    (Graph, false) | (Fps, true) => Off,
+                };
+            }
             Opt::PadVibration => s.controller.vibration = !s.controller.vibration,
             Opt::PadAdaptiveTriggers => {
                 s.controller.adaptive_triggers = !s.controller.adaptive_triggers
@@ -2290,6 +2304,10 @@ impl OptionsUi {
                     )),
                 )];
                 rows.push(Row::Header("options.video.display.header"));
+                // On iOS, where players look for it first; the desktop keeps vanilla's order.
+                if cfg!(target_os = "ios") {
+                    rows.push(Row::Big(Opt::FpsCounter));
+                }
                 rows.push(Row::Big(Opt::ExclusiveMode));
                 rows.extend(pairs(&[
                     Opt::MaxFps,
@@ -2598,6 +2616,15 @@ impl OptionsUi {
                     let b = button(x, y, 150.0, tr(key), page.map_or(Act::None, Act::Push));
                     out.push(if page.is_some() { b } else { inactive(b) });
                 }
+                // The FPS counter, in the free slot after the last page.
+                let i = entries.len();
+                out.push(option_widget(
+                    s,
+                    Opt::FpsCounter,
+                    cx - 158.0 + 4.0 + (i % 2) as f32 * 158.0,
+                    gy + (i / 2) as f32 * 24.0,
+                    150.0,
+                ));
                 out.push(done(h - 27.0));
                 top = 0.0;
                 bottom = 0.0;
