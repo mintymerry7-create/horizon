@@ -52,13 +52,16 @@ jobs:
           if [ -z "$KEY" ]; then echo "No HORIZON_SIM_DATA_KEY: no IPA with game files"; exit 0; fi
           # The small IPA too: once the one with files has run, the files stay in Documents.
           gh release upload sim-data target/ios/Horizon.ipa --clobber -R "$GITHUB_REPOSITORY"
+          # And at a public link an installer app can download from: it holds none of the game files.
+          gh release upload ios-latest target/ios/Horizon.ipa --clobber -R "$GITHUB_REPOSITORY"
           gh release download sim-data -R "$GITHUB_REPOSITORY" -p sim-data.bin -D "$RUNNER_TEMP"
           printf %s "$KEY" > "$RUNNER_TEMP/key"
           openssl enc -d -aes-256-cbc -pbkdf2 -in "$RUNNER_TEMP/sim-data.bin" -pass file:"$RUNNER_TEMP/key"             | tar -xz -C "$RUNNER_TEMP"
           rm "$RUNNER_TEMP/key" "$RUNNER_TEMP/sim-data.bin"
           app=target/ios/aarch64-apple-ios/Payload/Horizon.app
-          # One stored zip, not 28,000 files: signers and the installer check each file of the bundle.
-          (cd "$RUNNER_TEMP/26.3" && zip -qr0 "$OLDPWD/$app/resources.zip" .)
+          # One zip, not 28,000 files: signers and the installer check each file of the bundle. Compressed
+          # here, since the IPA's zip stores .zip files as they are.
+          (cd "$RUNNER_TEMP/26.3" && zip -qr "$OLDPWD/$app/resources.zip" .)
           rm -rf "$RUNNER_TEMP/26.3"
           (cd target/ios/aarch64-apple-ios && zip -qry "$RUNNER_TEMP/Horizon-with-files.ipa" Payload)
           rm "$app/resources.zip"

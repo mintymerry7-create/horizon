@@ -1,15 +1,16 @@
-//! Touch controls (iOS): touches become the keys, mouse buttons and view
-//! turns of a keyboard and mouse. In game, a stick in the lower left walks
-//! (the controller's analog move vector), a drag elsewhere turns the view,
-//! a tap uses and a long press mines, and buttons stand for the rest
-//! (horizon_client::touch lays them out). In menus one finger is the mouse,
-//! two scroll, and the on-screen keyboard (osk.rs) types.
+//! Touch controls (iOS), as Bedrock Edition's: touches become the keys, mouse
+//! buttons and view turns of a keyboard and mouse. In game, the D-pad in the
+//! lower left walks (a double tap forward sprints), a drag elsewhere turns the
+//! view, a tap uses and a long press mines, a long press on a hotbar slot
+//! drops its item, and buttons stand for the rest (horizon_client::touch lays
+//! them out). In menus one finger is the mouse, two scroll, and the on-screen
+//! keyboard (osk.rs) types.
 use super::event_loop::EventLoopCtl;
 use super::{Game, Screen};
 use horizon_client::{
     hud::HudBatch,
     osk,
-    touch::{self, Button, Overlay},
+    touch::{self, Button, Dir, Layout, Overlay, Rect},
 };
 use std::time::{Duration, Instant};
 use winit::{
@@ -32,12 +33,18 @@ const HOLD_TIME: Duration = Duration::from_millis(400);
 const TAP_SLOP: f32 = 12.0;
 /// The view turn per dp of drag, in mouse counts.
 const LOOK_SPEED: f64 = 1.6;
+/// A second press forward this soon after the last one sprints.
+const DOUBLE_TAP: Duration = Duration::from_millis(300);
+/// A hotbar slot held this long drops its item.
+const DROP_TIME: Duration = Duration::from_millis(500);
 
 /// What a finger is doing.
 #[derive(Clone, Copy, Debug)]
 enum Finger {
-    /// Holds the move stick, centred where it went down.
-    Stick { centre: (f32, f32), at: (f32, f32) },
+    /// Holds the D-pad, walking towards `dir`.
+    Pad { dir: Option<Dir> },
+    /// Holds a hotbar slot; drops its item once held long enough.
+    Hotbar { since: Instant, dropped: bool },
     /// Turns the view; may become a tap (use) or a hold (mine).
     Look {
         down: (f32, f32),
@@ -59,8 +66,15 @@ enum Finger {
 #[derive(Default)]
 pub(super) struct TouchState {
     fingers: Vec<(u64, Finger)>,
-    /// The sneak toggle.
+    /// The sneak and sprint toggles.
     sneaking: bool,
+    sprinting: bool,
+    /// Sprinting from a double tap forward, until the D-pad is let go.
+    dashing: bool,
+    /// When a press forward on the D-pad ended, for the double tap.
+    forward_ended: Option<Instant>,
+    /// The frame counter shows; read from horizon.txt once.
+    fps: Option<bool>,
     /// A touch has come: the overlay shows from then on.
     used: bool,
     /// The keyboard was opened for this text field already (it opens once per field).
@@ -79,37 +93,55 @@ impl Game<'_> {
         self.title.is_none() && self.player.is_some() && !self.pad_in_menu() && !self.dialog_open()
     }
 
-    /// The analog move vector from the stick (`[left, forward]`), as the
-    /// controller's left stick gives it.
+    /// The buttons' layout on this window, with the hotbar where `Gui.renderItemHotbar` puts it.
+    fn touch_layout(&self) -> Option<Layout> {
+        let (size, density) = self.touch_metrics()?;
+        let b = HudBatch::new(size);
+        let k = b.scale / density;
+        Some(Layout {
+            w: size[0] as f32 / density,
+            h: size[1] as f32 / density,
+            hotbar: Rect {
+                x: (b.width / 2.0 - 91.0) * k,
+                y: (b.height - 22.0) * k,
+                w: 182.0 * k,
+                h: 22.0 * k,
+            },
+        })
+    }
+
+    /// The move vector from the D-pad (`[left, forward]`), as the controller's left stick gives it.
     pub(super) fn touch_move(&self) -> Option<[f32; 2]> {
         if !ENABLED || !self.touch_playing() {
             return None;
         }
         self.touch.fingers.iter().find_map(|(_, f)| match *f {
-            Finger::Stick { centre, at } => horizon_client::gamepad::move_vector(
-                [
-                    (at.0 - centre.0) / touch::STICK_RADIUS,
-                    (centre.1 - at.1) / touch::STICK_RADIUS,
-                ],
-                0.15,
-            ),
+            Finger::Pad { dir } => dir.map(Dir::vector),
             _ => None,
         })
     }
 
+    /// Hold the sprint key while either way of sprinting is on.
+    fn touch_sprint_key(&mut self) {
+        if self.touch.sprinting || self.touch.dashing {
+            self.keys.insert(KeyCode::ControlLeft);
+        } else {
+            self.keys.remove(&KeyCode::ControlLeft);
+        }
+    }
+
     /// A touch on the window.
     pub(super) fn touch_event(&mut self, event_loop: &dyn EventLoopCtl, id: WindowId, t: Touch) {
-        let Some((size, density)) = self.touch_metrics() else {
+        let (Some((_, density)), Some(layout)) = (self.touch_metrics(), self.touch_layout()) else {
             return;
         };
         self.touch.used = true;
         self.last_input = Instant::now();
-        let (w, h) = (size[0] as f32 / density, size[1] as f32 / density);
         let p = (t.location.x as f32 / density, t.location.y as f32 / density);
         let playing = self.touch_playing();
         match t.phase {
             TouchPhase::Started => {
-                let finger = self.touch_start(event_loop, id, (w, h), p, playing, density);
+                let finger = self.touch_start(event_loop, id, &layout, p, playing, density);
                 self.touch.fingers.push((t.id, finger));
             }
             TouchPhase::Moved => {
@@ -117,7 +149,7 @@ impl Game<'_> {
                     return;
                 };
                 let finger = self.touch.fingers[i].1;
-                let finger = self.touch_move_finger(event_loop, id, finger, p, density);
+                let finger = self.touch_move_finger(event_loop, id, &layout, finger, p, density);
                 self.touch.fingers[i].1 = finger;
             }
             TouchPhase::Ended | TouchPhase::Cancelled => {
@@ -141,11 +173,12 @@ impl Game<'_> {
         &mut self,
         event_loop: &dyn EventLoopCtl,
         id: WindowId,
-        (w, h): (f32, f32),
+        layout: &Layout,
         p: (f32, f32),
         playing: bool,
         density: f32,
     ) -> Finger {
+        let (w, h) = (layout.w, layout.h);
         // The on-screen keyboard takes the touches on it.
         if self.pad.menu.osk.is_some() {
             let at_top = self.osk_at_top(self.gui_size().1);
@@ -162,7 +195,7 @@ impl Game<'_> {
                 return Finger::Done;
             }
         }
-        if let Some(button) = touch::button_at(w, h, playing, p) {
+        if let Some(button) = layout.button_at(playing, p) {
             self.touch_button(button, true);
             return Finger::Button(button);
         }
@@ -180,10 +213,24 @@ impl Game<'_> {
         }
         if let Some(slot) = self.touch_hotbar_slot(p, density) {
             self.selected = slot;
-            return Finger::Done;
+            return Finger::Hotbar {
+                since: Instant::now(),
+                dropped: false,
+            };
         }
-        if touch::in_stick_zone(w, h, p) {
-            return Finger::Stick { centre: p, at: p };
+        if layout.on_pad(p) {
+            let dir = layout.dir_at(p);
+            // A second press forward soon after the last sprints, as in Bedrock.
+            if dir.is_some_and(Dir::forward)
+                && self
+                    .touch
+                    .forward_ended
+                    .is_some_and(|t| t.elapsed() < DOUBLE_TAP)
+            {
+                self.touch.dashing = true;
+                self.touch_sprint_key();
+            }
+            return Finger::Pad { dir };
         }
         Finger::Look {
             down: p,
@@ -198,30 +245,16 @@ impl Game<'_> {
         &mut self,
         event_loop: &dyn EventLoopCtl,
         id: WindowId,
+        layout: &Layout,
         finger: Finger,
         p: (f32, f32),
         density: f32,
     ) -> Finger {
         match finger {
-            Finger::Stick { centre, .. } => {
-                // The knob stays within the ring; the ring follows a finger that goes past it.
-                let (dx, dy) = (p.0 - centre.0, p.1 - centre.1);
-                let len = (dx * dx + dy * dy).sqrt();
-                let centre = if len > touch::STICK_RADIUS {
-                    let k = (len - touch::STICK_RADIUS) / len;
-                    (centre.0 + dx * k, centre.1 + dy * k)
-                } else {
-                    centre
-                };
-                // Pushed to the edge: sprint, as a double tap forward would.
-                let full = len >= touch::STICK_RADIUS * 0.95 && dy < 0.0;
-                if full {
-                    self.keys.insert(KeyCode::ControlLeft);
-                } else {
-                    self.keys.remove(&KeyCode::ControlLeft);
-                }
-                Finger::Stick { centre, at: p }
-            }
+            // The finger slides between the arrows, and off the pad keeps its direction.
+            Finger::Pad { .. } => Finger::Pad {
+                dir: layout.dir_at(p),
+            },
             Finger::Look {
                 down,
                 at,
@@ -280,8 +313,12 @@ impl Game<'_> {
         ended: bool,
     ) {
         match finger {
-            Finger::Stick { .. } => {
-                self.keys.remove(&KeyCode::ControlLeft);
+            Finger::Pad { dir } => {
+                if dir.is_some_and(Dir::forward) {
+                    self.touch.forward_ended = Some(Instant::now());
+                }
+                self.touch.dashing = false;
+                self.touch_sprint_key();
             }
             Finger::Look {
                 since,
@@ -305,7 +342,7 @@ impl Game<'_> {
             Finger::Pointer => {
                 self.touch_pointer(event_loop, id, p, density, Some(ElementState::Released));
             }
-            Finger::Scroll { .. } | Finger::Done => {}
+            Finger::Scroll { .. } | Finger::Hotbar { .. } | Finger::Done => {}
         }
     }
 
@@ -315,8 +352,13 @@ impl Game<'_> {
         if !ENABLED {
             return;
         }
+        if self.touch.fps.is_none() {
+            let dir = std::env::current_dir().unwrap_or_default();
+            self.touch.fps = Some(touch::fps_shown(&dir));
+        }
         let playing = self.touch_playing();
         let mut start_mining = false;
+        let mut drop = false;
         for (_, f) in &mut self.touch.fingers {
             if let Finger::Look {
                 since,
@@ -331,6 +373,17 @@ impl Game<'_> {
                 *mining = true;
                 start_mining = true;
             }
+            if let Finger::Hotbar { since, dropped } = f
+                && !*dropped
+                && playing
+                && since.elapsed() >= DROP_TIME
+            {
+                *dropped = true;
+                drop = true;
+            }
+        }
+        if drop && let Err(e) = self.key_pressed(KeyCode::KeyQ) {
+            log::warn!("Horizon: touch drop: {e}");
         }
         if start_mining {
             let _ = self.play_mouse(MouseButton::Left, true);
@@ -353,7 +406,9 @@ impl Game<'_> {
         let (mut left, mut right) = (false, false);
         for (_, f) in &mut self.touch.fingers {
             match *f {
-                Finger::Stick { .. } | Finger::Look { mining: false, .. } => *f = Finger::Done,
+                Finger::Pad { .. } | Finger::Hotbar { .. } | Finger::Look { mining: false, .. } => {
+                    *f = Finger::Done
+                }
                 Finger::Look { mining: true, .. } | Finger::Button(Button::Attack) => {
                     left = true;
                     *f = Finger::Done;
@@ -369,7 +424,8 @@ impl Game<'_> {
                 _ => {}
             }
         }
-        self.keys.remove(&KeyCode::ControlLeft);
+        self.touch.dashing = false;
+        self.touch_sprint_key();
         if left {
             let _ = self.play_mouse(MouseButton::Left, false);
         }
@@ -397,13 +453,24 @@ impl Game<'_> {
                 }
                 Ok(())
             }
+            (Button::Sprint, true) => {
+                self.touch.sprinting = !self.touch.sprinting;
+                self.touch_sprint_key();
+                Ok(())
+            }
+            (Button::Fps, true) => {
+                let shown = !self.touch.fps.unwrap_or(false);
+                self.touch.fps = Some(shown);
+                touch::set_fps_shown(&std::env::current_dir().unwrap_or_default(), shown);
+                Ok(())
+            }
             (Button::Attack, _) => self.play_mouse(MouseButton::Left, down),
             (Button::Use, _) => self.play_mouse(MouseButton::Right, down),
             (_, false) => Ok(()),
             (Button::Inventory, true) => self.key_pressed(KeyCode::KeyE),
-            (Button::Drop, true) => self.key_pressed(KeyCode::KeyQ),
             (Button::Chat, true) => self.key_pressed(KeyCode::KeyT),
             (Button::Perspective, true) => self.key_pressed(KeyCode::F5),
+            (Button::Pause, true) => self.pad_back(),
             (Button::Back, true) => {
                 if self.pad.menu.osk.take().is_some() {
                     Ok(())
@@ -468,25 +535,29 @@ impl Game<'_> {
         Some((((gx - left) / 20.0) as usize).min(8))
     }
 
-    /// The buttons and the stick, over everything but the on-screen keyboard.
+    /// The D-pad, the buttons and the frame counter, over everything but the on-screen keyboard.
     pub(super) fn draw_touch(&self, batch: &mut HudBatch) {
-        if !ENABLED || !self.touch.used {
+        if !ENABLED {
             return;
         }
+        let Some(layout) = self.touch_layout() else {
+            return;
+        };
         let mut overlay = Overlay {
             playing: self.touch_playing(),
             sneak: self.touch.sneaking,
+            sprint: self.touch.sprinting || self.touch.dashing,
             jump: self.keys.contains(&KeyCode::Space),
+            fps: self
+                .touch
+                .fps
+                .unwrap_or(false)
+                .then(|| self.frame_reading().0),
             ..Overlay::default()
         };
         for (_, f) in &self.touch.fingers {
             match *f {
-                Finger::Stick { centre, at } => {
-                    let (dx, dy) = (at.0 - centre.0, at.1 - centre.1);
-                    let len = (dx * dx + dy * dy).sqrt().max(touch::STICK_RADIUS);
-                    let k = touch::STICK_RADIUS / len;
-                    overlay.stick = Some((centre, (centre.0 + dx * k, centre.1 + dy * k)));
-                }
+                Finger::Pad { dir } => overlay.walking = dir,
                 Finger::Look { mining: true, .. } | Finger::Button(Button::Attack) => {
                     overlay.attack = true;
                 }
@@ -495,7 +566,7 @@ impl Game<'_> {
             }
         }
         let mut ui = horizon_client::ui_theme::Ui::new(&self.gui.atlas, batch, self.cursor);
-        touch::draw(&mut ui, &overlay);
+        touch::draw(&mut ui, &layout, &overlay);
         ui.finish();
     }
 }
