@@ -1,4 +1,8 @@
 {
+  "horizon.account.header": "Microsoft Account",
+  "horizon.account.sign_in": "Sign in with Microsoft",
+  "horizon.account.open_link": "Open microsoft.com/link",
+  "horizon.account.sign_out": "Sign Out",
   "horizon.options.controller": "Controller",
   "horizon.options.fps_counter": "FPS Counter",
   "horizon.options.fps_counter.graph": "FPS and Graph",

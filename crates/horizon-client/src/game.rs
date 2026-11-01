@@ -453,9 +453,13 @@ fn warn_in_frame_deprecated(what: &str) {
     );
 }
 impl Options {
-    /// The name to join servers with: the one given, else the offline name kept
-    /// next to options.txt (created on first use).
+    /// The name to join servers with: the signed-in account's (it can change while the game
+    /// runs, on iOS), the one given, else the offline name kept next to options.txt (created on
+    /// first use).
     fn player_name(&self) -> String {
+        if let Some(session) = horizon_client::auth::current() {
+            return session.name.clone();
+        }
         self.player_name.clone().unwrap_or_else(|| {
             std::env::current_dir().map_or_else(
                 |_| horizon_client::offline_name::generate(0),

@@ -52,7 +52,12 @@ pub fn open_uri(uri: &str) {
     if let Err(error) = open::that_detached(uri) {
         log::warn!("Horizon: could not open URI {uri}: {error}");
     }
-    #[cfg(not(windows))]
+    // iOS apps can't start programs: UIKit opens it in Safari.
+    #[cfg(target_os = "ios")]
+    if !horizon_threads::ios_open::open_url(uri) {
+        log::warn!("Horizon: could not open URI {uri}");
+    }
+    #[cfg(not(any(windows, target_os = "ios")))]
     open_folder(Path::new(uri));
 }
 /// The resource root to load from, given the vanilla root, the selection and

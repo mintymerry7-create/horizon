@@ -5,7 +5,7 @@
 //! process's memory: it is never logged, printed or written anywhere.
 use std::{
     path::Path,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex},
     time::{Duration, SystemTime},
 };
 
@@ -103,14 +103,24 @@ impl AuthSession {
     }
 }
 
-static CURRENT: OnceLock<Arc<AuthSession>> = OnceLock::new();
+static CURRENT: Mutex<Option<Arc<AuthSession>>> = Mutex::new(None);
 
-/// The account this game was started with (set once at start).
+/// The account this game was started with, or the one signed in since (`microsoft.rs`, on iOS).
+/// Another account's chat key pair goes with the old one.
 pub fn set_current(session: AuthSession) {
-    let _ = CURRENT.set(Arc::new(session));
+    let mut current = CURRENT.lock().unwrap();
+    if current.as_ref().is_some_and(|s| s.uuid != session.uuid) {
+        CHAT_KEYS.lock().unwrap().current = None;
+    }
+    *current = Some(Arc::new(session));
+}
+/// Signed out: offline from now on.
+pub fn clear_current() {
+    *CURRENT.lock().unwrap() = None;
+    CHAT_KEYS.lock().unwrap().current = None;
 }
 pub fn current() -> Option<Arc<AuthSession>> {
-    CURRENT.get().cloned()
+    CURRENT.lock().unwrap().clone()
 }
 
 /// Why joining a server through the session service failed, like the

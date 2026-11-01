@@ -40,6 +40,9 @@ jobs:
       - name: Build Horizon.ipa
         env:
           HORIZON_IOS_BUILD: ${{ github.run_number }}
+          # The Azure app for the in-game Microsoft sign-in (docs/microsoft-account.md): a
+          # repository variable, not a secret (client IDs are public). Unset: no sign-in.
+          HORIZON_MSA_CLIENT_ID: ${{ vars.HORIZON_MSA_CLIENT_ID }}
         run: bash ios/build-ipa.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -91,6 +94,8 @@ jobs:
         with:
           key: ios-sim
       - name: Build for the Simulator
+        env:
+          HORIZON_MSA_CLIENT_ID: ${{ vars.HORIZON_MSA_CLIENT_ID }}
         run: bash ios/build-app.sh aarch64-apple-ios-sim fast
       - name: Resources (encrypted draft release)
         env:

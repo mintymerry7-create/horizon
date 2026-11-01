@@ -323,6 +323,7 @@ impl Game<'_> {
                     let text = self.agent_details();
                     self.clipboard.set(&text);
                 }
+                Event::OpenUri(uri) => super::packs::open_uri(&uri),
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {
                     self.settings.save(&Self::options_path());

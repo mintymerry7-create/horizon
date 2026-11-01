@@ -1311,6 +1311,58 @@ enum Act {
     /// Credits & Attribution's Credits button (WinScreen without the poem).
     Credits,
     CopyAgentDetails,
+    /// The Online page's Microsoft account buttons (iOS).
+    Microsoft(MsAct),
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum MsAct {
+    SignIn,
+    OpenLink,
+    Cancel,
+    SignOut,
+}
+/// What a Microsoft account button does; Open in Browser is the game's to do.
+fn microsoft_act(act: MsAct) -> Option<Event> {
+    use crate::microsoft;
+    match act {
+        MsAct::SignIn => microsoft::sign_in(),
+        MsAct::Cancel => microsoft::cancel(),
+        MsAct::SignOut => microsoft::sign_out(),
+        MsAct::OpenLink => {
+            if let microsoft::Status::Code { user_code, uri } = microsoft::status() {
+                return Some(Event::OpenUri(microsoft::link(&user_code, &uri)));
+            }
+        }
+    }
+    None
+}
+/// The Online page's account section: where sign-in stands, and its buttons.
+fn account_rows() -> Vec<Row> {
+    use crate::microsoft::{self, Status};
+    let status = microsoft::status();
+    let mut rows = vec![Row::Header("horizon.account.header")];
+    rows.extend(microsoft::status_lines(&status).into_iter().map(Row::Note));
+    let b = |key: &str, act: MsAct| button(0.0, 0.0, 150.0, tr(key), Act::Microsoft(act));
+    rows.push(match status {
+        Status::SignedOut | Status::Failed(_) => {
+            let sign_in = b("horizon.account.sign_in", MsAct::SignIn);
+            let sign_in = if microsoft::client_id().is_some() {
+                sign_in
+            } else {
+                inactive(sign_in)
+            };
+            Row::Buttons(sign_in, None)
+        }
+        Status::Code { .. } => Row::Buttons(
+            b("horizon.account.open_link", MsAct::OpenLink),
+            Some(b("gui.cancel", MsAct::Cancel)),
+        ),
+        Status::Starting | Status::Finishing => Row::Buttons(b("gui.cancel", MsAct::Cancel), None),
+        Status::SignedIn { .. } => {
+            Row::Buttons(b("horizon.account.sign_out", MsAct::SignOut), None)
+        }
+    });
+    rows
 }
 enum WKind {
     Button {
@@ -1435,6 +1487,8 @@ pub enum Event {
     Credits,
     /// Copy how an agent connects (the AI Agent page).
     CopyAgentDetails,
+    /// Open this page in the system browser (the Microsoft sign-in's code page).
+    OpenUri(String),
     /// The narrator option changed (after its `Changed`): the option's
     /// `onValueUpdate`, `GameNarrator.updateNarratorStatus`.
     Narrator,
@@ -2367,8 +2421,14 @@ impl OptionsUi {
                 pairs(&opts)
             }
             Page::Online => {
-                // OnlineOptionsScreen without the Xbox and friends-list parts.
-                let mut rows = vec![Row::Header("options.online.friends.header")];
+                // OnlineOptionsScreen without the Xbox and friends-list parts. On iOS, where
+                // no launcher signs in, the Microsoft account first (microsoft.rs).
+                let mut rows = if cfg!(target_os = "ios") {
+                    account_rows()
+                } else {
+                    Vec::new()
+                };
+                rows.push(Row::Header("options.online.friends.header"));
                 rows.extend(pairs(&[Opt::InGameNotification, Opt::SharePresence]));
                 rows.push(Row::Header("options.online.servers.header"));
                 rows.push(Row::Big(Opt::AllowServerListing));
@@ -3867,6 +3927,7 @@ impl OptionsUi {
                         }
                         Act::Credits => events.push(Event::Credits),
                         Act::CopyAgentDetails => events.push(Event::CopyAgentDetails),
+                        Act::Microsoft(act) => events.extend(microsoft_act(act)),
                         Act::None => {}
                     }
                 }
@@ -4774,6 +4835,7 @@ impl OptionsUi {
                         }
                         Act::Credits => events.push(Event::Credits),
                         Act::CopyAgentDetails => events.push(Event::CopyAgentDetails),
+                        Act::Microsoft(act) => events.extend(microsoft_act(act)),
                         Act::None => {}
                     }
                     return events;

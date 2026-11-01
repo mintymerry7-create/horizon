@@ -36,11 +36,17 @@ all there, visible in Files.
 ## Accounts
 
 - **Offline:** single player and LAN work under the offline name you pick in the game.
-- **Online-mode servers:** copy a session from the launcher on the computer as `session.json` into the Horizon
-  folder. The game reads it once and deletes it. Minecraft tokens last about a day.
+- **Microsoft account:** Options > Online > **Sign in with Microsoft**. The game shows a code; **Open
+  microsoft.com/link** opens Safari with it filled in. Once you approve, the game checks that the account owns
+  Minecraft: Java Edition and signs in to its profile. Online-mode servers then use it. The account stays in the iOS
+  keychain (never in Documents) and comes back on the next start; its Minecraft token is renewed in the background.
+  **Sign Out** forgets it (`microsoft.rs`).
+- **Online-mode servers, without signing in:** copy a session from the launcher on the computer as `session.json`
+  into the Horizon folder. The game reads it once and deletes it. Minecraft tokens last about a day.
 
-The app has no Microsoft sign-in of its own. That needs the launcher's Azure app (`HORIZON_MSA_CLIENT_ID`), which
-this source doesn't contain.
+Sign-in needs an Azure app of your own, approved by Mojang ([microsoft-account.md](microsoft-account.md)). Set its
+client ID as the repository variable `HORIZON_MSA_CLIENT_ID` (Settings > Secrets and variables > Actions >
+Variables): `ios.yml` builds it in. Without it, the Online page says sign-in isn't configured.
 
 ## Touch controls
 

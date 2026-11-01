@@ -4,6 +4,9 @@
 /// The game window's boot screen, before wgpu's first frame paints over it.
 #[cfg(target_os = "windows")]
 pub mod boot_paint;
+/// Opening a web page in Safari.
+#[cfg(target_os = "ios")]
+pub mod ios_open;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 

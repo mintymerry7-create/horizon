@@ -28,6 +28,8 @@ pub fn launch_args() -> Vec<String> {
         .or_else(|| keep(&bundled_archive()?, &docs).ok())
         .unwrap_or_else(|| docs.join("resources"));
     args.extend(["--resources".to_owned(), resources.display().to_string()]);
+    // The Microsoft account signed in on an earlier run (Options > Online), from the keychain.
+    horizon_client::microsoft::restore();
     // A session the launcher wrote (online-mode servers); the game reads it once and deletes it.
     let session = docs.join("session.json");
     if session.is_file() {

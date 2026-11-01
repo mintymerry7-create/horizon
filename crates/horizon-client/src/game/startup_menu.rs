@@ -572,6 +572,7 @@ impl Loading {
                         self.menu.win = Some((screen, Instant::now()));
                     }
                 }
+                Event::OpenUri(uri) => packs::open_uri(&uri),
                 Event::Narrator => super::narrator::update_status(
                     self.settings.narrator(),
                     &mut self.menu.narrator_toast,
