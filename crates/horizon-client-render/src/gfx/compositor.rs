@@ -34,7 +34,7 @@ impl Renderer {
             &self.adapter,
             &self.device,
             &self.queue,
-            window.inner_size().into(),
+            super::surface_size(&window).into(),
         )
     }
 

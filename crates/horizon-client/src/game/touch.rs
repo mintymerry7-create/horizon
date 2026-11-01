@@ -45,6 +45,13 @@ enum Finger {
     Pad { dir: Option<Dir> },
     /// Holds a hotbar slot; drops its item once held long enough.
     Hotbar { since: Instant, dropped: bool },
+    /// A finger in a menu: a tap clicks, a drag up or down scrolls, a drag
+    /// sideways drags the pointer (sliders).
+    Menu {
+        down: (f32, f32),
+        at: (f32, f32),
+        drag: MenuDrag,
+    },
     /// Turns the view; may become a tap (use) or a hold (mine).
     Look {
         down: (f32, f32),
@@ -55,13 +62,20 @@ enum Finger {
     },
     /// Holds a button.
     Button(Button),
-    /// The pointer in a menu.
-    Pointer,
-    /// A second finger in a menu: scrolls.
-    Scroll { at: (f32, f32) },
     /// Ignored until it lifts (a hotbar or keyboard tap).
     Done,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MenuDrag {
+    /// Not moved past `TAP_SLOP` yet.
+    Undecided,
+    Scroll,
+    Pointer,
+}
+
+/// dp of drag per scroll step in menus.
+const SCROLL_STEP: f32 = 18.0;
 
 #[derive(Default)]
 pub(super) struct TouchState {
@@ -73,8 +87,6 @@ pub(super) struct TouchState {
     dashing: bool,
     /// When a press forward on the D-pad ended, for the double tap.
     forward_ended: Option<Instant>,
-    /// The frame counter shows; read from horizon.txt once.
-    fps: Option<bool>,
     /// A touch has come: the overlay shows from then on.
     used: bool,
     /// The keyboard was opened for this text field already (it opens once per field).
@@ -82,7 +94,8 @@ pub(super) struct TouchState {
 }
 
 impl Game<'_> {
-    /// The window's size in physical pixels and the dp scale.
+    /// The window's size in physical pixels and the dp scale: the surface's,
+    /// which on iOS fills the screen as the touches do.
     fn touch_metrics(&self) -> Option<([u32; 2], f32)> {
         let r = self.renderer.as_ref()?;
         let size = [r.config.width, r.config.height];
@@ -98,9 +111,32 @@ impl Game<'_> {
         let (size, density) = self.touch_metrics()?;
         let b = HudBatch::new(size);
         let k = b.scale / density;
+        let (w, h) = (size[0] as f32 / density, size[1] as f32 / density);
+        // The safe area, which winit gives as the inner size and position on iOS.
+        let safe = self
+            .window
+            .as_ref()
+            .and_then(|win| {
+                let (inner, outer) = (win.inner_position().ok()?, win.outer_position().ok()?);
+                let s = win.inner_size();
+                Some(Rect {
+                    x: (inner.x - outer.x) as f32 / density,
+                    y: (inner.y - outer.y) as f32 / density,
+                    w: s.width as f32 / density,
+                    h: s.height as f32 / density,
+                })
+            })
+            .filter(|r| r.w > 0.0 && r.h > 0.0 && r.x + r.w <= w + 1.0 && r.y + r.h <= h + 1.0)
+            .unwrap_or(Rect {
+                x: 0.0,
+                y: 0.0,
+                w,
+                h,
+            });
         Some(Layout {
-            w: size[0] as f32 / density,
-            h: size[1] as f32 / density,
+            w,
+            h,
+            safe,
             hotbar: Rect {
                 x: (b.width / 2.0 - 91.0) * k,
                 y: (b.height - 22.0) * k,
@@ -200,16 +236,13 @@ impl Game<'_> {
             return Finger::Button(button);
         }
         if !playing {
-            if self
-                .touch
-                .fingers
-                .iter()
-                .any(|(_, f)| matches!(f, Finger::Pointer))
-            {
-                return Finger::Scroll { at: p };
-            }
-            self.touch_pointer(event_loop, id, p, density, Some(ElementState::Pressed));
-            return Finger::Pointer;
+            // The pointer goes there, for what a scroll scrolls; the click waits for the lift.
+            self.touch_pointer(event_loop, id, p, density, None);
+            return Finger::Menu {
+                down: p,
+                at: p,
+                drag: MenuDrag::Undecided,
+            };
         }
         if let Some(slot) = self.touch_hotbar_slot(p, density) {
             self.selected = slot;
@@ -279,25 +312,53 @@ impl Game<'_> {
                     mining,
                 }
             }
-            Finger::Pointer => {
-                self.touch_pointer(event_loop, id, p, density, None);
-                Finger::Pointer
-            }
-            Finger::Scroll { at } => {
-                let steps = (p.1 - at.1) / 24.0;
-                if steps.abs() < 1.0 {
-                    return finger;
+            Finger::Menu { down, at, drag } => {
+                let drag = match drag {
+                    MenuDrag::Undecided if dist(down, p) > TAP_SLOP => {
+                        if (p.1 - down.1).abs() >= (p.0 - down.0).abs() {
+                            MenuDrag::Scroll
+                        } else {
+                            // A sideways drag holds the button down where the finger went down.
+                            self.touch_pointer(
+                                event_loop,
+                                id,
+                                down,
+                                density,
+                                Some(ElementState::Pressed),
+                            );
+                            MenuDrag::Pointer
+                        }
+                    }
+                    d => d,
+                };
+                match drag {
+                    MenuDrag::Undecided => Finger::Menu { down, at, drag },
+                    MenuDrag::Pointer => {
+                        self.touch_pointer(event_loop, id, p, density, None);
+                        Finger::Menu { down, at: p, drag }
+                    }
+                    MenuDrag::Scroll => {
+                        // The list follows the finger: dragging up scrolls down.
+                        let steps = ((p.1 - at.1) / SCROLL_STEP).trunc();
+                        if steps == 0.0 {
+                            return Finger::Menu { down, at, drag };
+                        }
+                        self.handle_window_event(
+                            event_loop,
+                            id,
+                            WindowEvent::MouseWheel {
+                                device_id: DeviceId::dummy(),
+                                delta: MouseScrollDelta::LineDelta(0.0, steps),
+                                phase: TouchPhase::Moved,
+                            },
+                        );
+                        Finger::Menu {
+                            down,
+                            at: (at.0, at.1 + steps * SCROLL_STEP),
+                            drag,
+                        }
+                    }
                 }
-                self.handle_window_event(
-                    event_loop,
-                    id,
-                    WindowEvent::MouseWheel {
-                        device_id: DeviceId::dummy(),
-                        delta: MouseScrollDelta::LineDelta(0.0, steps.trunc()),
-                        phase: TouchPhase::Moved,
-                    },
-                );
-                Finger::Scroll { at: p }
             }
             other => other,
         }
@@ -339,10 +400,18 @@ impl Game<'_> {
                 }
             }
             Finger::Button(button) => self.touch_button(button, false),
-            Finger::Pointer => {
-                self.touch_pointer(event_loop, id, p, density, Some(ElementState::Released));
-            }
-            Finger::Scroll { .. } | Finger::Hotbar { .. } | Finger::Done => {}
+            Finger::Menu { down, drag, .. } => match drag {
+                // A tap: a click where the finger went down.
+                MenuDrag::Undecided if ended => {
+                    self.touch_pointer(event_loop, id, down, density, Some(ElementState::Pressed));
+                    self.touch_pointer(event_loop, id, down, density, Some(ElementState::Released));
+                }
+                MenuDrag::Pointer => {
+                    self.touch_pointer(event_loop, id, p, density, Some(ElementState::Released));
+                }
+                _ => {}
+            },
+            Finger::Hotbar { .. } | Finger::Done => {}
         }
     }
 
@@ -351,10 +420,6 @@ impl Game<'_> {
     pub(super) fn touch_frame(&mut self) {
         if !ENABLED {
             return;
-        }
-        if self.touch.fps.is_none() {
-            let dir = std::env::current_dir().unwrap_or_default();
-            self.touch.fps = Some(touch::fps_shown(&dir));
         }
         let playing = self.touch_playing();
         let mut start_mining = false;
@@ -458,12 +523,6 @@ impl Game<'_> {
                 self.touch_sprint_key();
                 Ok(())
             }
-            (Button::Fps, true) => {
-                let shown = !self.touch.fps.unwrap_or(false);
-                self.touch.fps = Some(shown);
-                touch::set_fps_shown(&std::env::current_dir().unwrap_or_default(), shown);
-                Ok(())
-            }
             (Button::Attack, _) => self.play_mouse(MouseButton::Left, down),
             (Button::Use, _) => self.play_mouse(MouseButton::Right, down),
             (_, false) => Ok(()),
@@ -535,7 +594,7 @@ impl Game<'_> {
         Some((((gx - left) / 20.0) as usize).min(8))
     }
 
-    /// The D-pad, the buttons and the frame counter, over everything but the on-screen keyboard.
+    /// The D-pad and the buttons, over everything but the on-screen keyboard.
     pub(super) fn draw_touch(&self, batch: &mut HudBatch) {
         if !ENABLED {
             return;
@@ -548,11 +607,6 @@ impl Game<'_> {
             sneak: self.touch.sneaking,
             sprint: self.touch.sprinting || self.touch.dashing,
             jump: self.keys.contains(&KeyCode::Space),
-            fps: self
-                .touch
-                .fps
-                .unwrap_or(false)
-                .then(|| self.frame_reading().0),
             ..Overlay::default()
         };
         for (_, f) in &self.touch.fingers {

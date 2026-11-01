@@ -5,7 +5,6 @@
 //! turns a keyboard and mouse would give; this module only lays the buttons
 //! out and draws them, in the design system's dp.
 use crate::ui_theme::{self, Face, Ui};
-use std::path::Path;
 
 /// An on-screen button.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -28,8 +27,6 @@ pub enum Button {
     Perspective,
     /// Escape: the pause menu.
     Pause,
-    /// Shows or hides the frame counter.
-    Fps,
     /// Escape in menus: back.
     Back,
     /// Opens or closes the on-screen keyboard in menus.
@@ -94,24 +91,33 @@ const BIG: f32 = 72.0;
 const SMALL: f32 = 46.0;
 const GAP: f32 = 8.0;
 
-/// The screen's buttons for a `w` x `h` dp screen. `hotbar` is where the
-/// hotbar is drawn, for the inventory button beside it.
+/// The screen's buttons for a `w` x `h` dp screen. `safe` is the part of it
+/// clear of the notch and the rounded corners, which the buttons keep to;
+/// `hotbar` is where the hotbar is drawn, for the inventory button beside it.
 pub struct Layout {
     pub w: f32,
     pub h: f32,
+    pub safe: Rect,
     pub hotbar: Rect,
 }
 
 impl Layout {
     /// The D-pad's cell at column `col` and row `row` of its 3 x 3 grid.
     fn cell(&self, col: f32, row: f32) -> Rect {
-        let y0 = self.h - MARGIN - 3.0 * CELL - GAP;
+        let y0 = self.bottom() - 3.0 * CELL - GAP;
         Rect {
-            x: MARGIN + col * (CELL + GAP / 2.0),
+            x: self.safe.x + MARGIN + col * (CELL + GAP / 2.0),
             y: y0 + row * (CELL + GAP / 2.0),
             w: CELL,
             h: CELL,
         }
+    }
+    /// The lowest y and the rightmost x a button reaches.
+    fn bottom(&self) -> f32 {
+        self.safe.y + self.safe.h - MARGIN
+    }
+    fn right(&self) -> f32 {
+        self.safe.x + self.safe.w - MARGIN
     }
     /// The D-pad's whole grid.
     pub fn pad(&self) -> Rect {
@@ -170,10 +176,10 @@ impl Layout {
 
     /// The buttons, in game (`playing`) or in a menu.
     pub fn buttons(&self, playing: bool) -> Vec<(Button, Rect)> {
-        let (w, h) = (self.w, self.h);
+        let (right, bottom) = (self.right(), self.bottom());
         let top = |i: f32| Rect {
-            x: w - MARGIN - SMALL - i * (SMALL + GAP),
-            y: MARGIN,
+            x: right - SMALL - i * (SMALL + GAP),
+            y: self.safe.y + MARGIN,
             w: SMALL,
             h: SMALL,
         };
@@ -183,8 +189,8 @@ impl Layout {
         // The lower right, from the corner: jump; attack over it, sprint over that;
         // use left of attack. The row beside the hotbar stays free for the inventory.
         let big = |col: f32, row: f32| Rect {
-            x: w - MARGIN - BIG - col * (BIG + GAP),
-            y: h - MARGIN - BIG - row * (BIG + GAP),
+            x: right - BIG - col * (BIG + GAP),
+            y: bottom - BIG - row * (BIG + GAP),
             w: BIG,
             h: BIG,
         };
@@ -193,7 +199,6 @@ impl Layout {
             (Button::Pause, top(0.0)),
             (Button::Chat, top(1.0)),
             (Button::Perspective, top(2.0)),
-            (Button::Fps, top(3.0)),
             (Button::Sneak, self.cell(1.0, 1.0)),
             (Button::Jump, big(0.0, 0.0)),
             (Button::Attack, big(0.0, 1.0)),
@@ -220,14 +225,6 @@ impl Layout {
     }
 }
 
-/// Whether the frame counter shows: `touchFps` in horizon.txt in the game folder. Off by default.
-pub fn fps_shown(dir: &Path) -> bool {
-    ui_theme::preference(dir, "touchFps").as_deref() == Some("true")
-}
-pub fn set_fps_shown(dir: &Path, shown: bool) {
-    ui_theme::set_preference(dir, "touchFps", shown.then_some("true"));
-}
-
 /// What the overlay shows this frame.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Overlay {
@@ -240,8 +237,6 @@ pub struct Overlay {
     pub sprint: bool,
     pub attack: bool,
     pub using: bool,
-    /// The frame counter, when it shows.
-    pub fps: Option<u32>,
 }
 
 const PLATE: u32 = 0x59_00_00_00;
@@ -249,7 +244,7 @@ const PLATE_LIT: u32 = 0x73_ff_ff_ff;
 const EDGE: u32 = 0x40_ff_ff_ff;
 const INK: u32 = 0xeb_ff_ff_ff;
 
-/// Draw the D-pad, the buttons and the frame counter, translucent so the world shows through.
+/// Draw the D-pad and the buttons, translucent so the world shows through.
 pub fn draw(ui: &mut Ui, layout: &Layout, overlay: &Overlay) {
     if overlay.playing {
         for (dir, r) in layout.arrows() {
@@ -276,19 +271,10 @@ pub fn draw(ui: &mut Ui, layout: &Layout, overlay: &Overlay) {
             Button::Sprint => overlay.sprint,
             Button::Attack => overlay.attack,
             Button::Use => overlay.using,
-            Button::Fps => overlay.fps.is_some(),
             _ => false,
         };
         plate(ui, r, lit);
         icon(ui, button, r);
-    }
-    if let Some(fps) = overlay.fps.filter(|_| overlay.playing) {
-        let text = format!("{fps} FPS");
-        let size = ui_theme::SMALL;
-        let w = ui.measure(Face::Medium, size, &text) + 16.0;
-        let (x, y) = (MARGIN, MARGIN);
-        ui.rounded(x, y, w, size * 1.45 + 8.0, 6.0, PLATE);
-        ui.text(Face::Medium, size, x + 8.0, y + 4.0, INK, &text);
     }
 }
 
@@ -406,11 +392,17 @@ fn icon(ui: &mut Ui, button: Button, r: Rect) {
             arrow(ui, (cx - s * 0.3, cy), s * 0.9, 270.0);
             bar(ui, (cx - s * 0.2, cy), (cx + s, cy), s * 0.3);
         }
-        Button::Fps | Button::Keyboard => {
-            let text = if button == Button::Fps { "FPS" } else { "abc" };
+        Button::Keyboard => {
             let size = ui_theme::SMALL;
             let line = (size * 1.45).round();
-            ui.text_centered(Face::Medium, size, cx, (cy - line / 2.0).round(), INK, text);
+            ui.text_centered(
+                Face::Medium,
+                size,
+                cx,
+                (cy - line / 2.0).round(),
+                INK,
+                "abc",
+            );
         }
     }
 }
@@ -458,26 +450,36 @@ fn arrow(ui: &mut Ui, (cx, cy): (f32, f32), size: f32, turn: f32) {
 mod tests {
     use super::*;
 
-    /// An iPhone in landscape (its safe area) and an iPad, with their hotbars.
+    /// An iPhone in landscape (62 pt each side and 21 pt at the bottom out of its
+    /// safe area, at 3 px a point) and an iPad (none), with their hotbars.
     fn layouts() -> Vec<Layout> {
-        [(2250.0, 1143.0, 4.0), (2732.0, 2048.0, 8.0)]
-            .into_iter()
-            .map(|(pw, ph, gui): (f32, f32, f32)| {
-                let d = density(pw, ph);
-                let (w, h) = (pw / d, ph / d);
-                let (bw, bh) = (182.0 * gui / d, 22.0 * gui / d);
-                Layout {
-                    w,
-                    h,
-                    hotbar: Rect {
-                        x: (w - bw) / 2.0,
-                        y: h - bh,
-                        w: bw,
-                        h: bh,
-                    },
-                }
-            })
-            .collect()
+        [
+            (2622.0, 1206.0, 4.0, [186.0, 0.0, 186.0, 63.0]),
+            (2732.0, 2048.0, 8.0, [0.0; 4]),
+        ]
+        .into_iter()
+        .map(|(pw, ph, gui, [l, t, r, b]): (f32, f32, f32, [f32; 4])| {
+            let d = density(pw, ph);
+            let (w, h) = (pw / d, ph / d);
+            let (bw, bh) = (182.0 * gui / d, 22.0 * gui / d);
+            Layout {
+                w,
+                h,
+                safe: Rect {
+                    x: l / d,
+                    y: t / d,
+                    w: (pw - l - r) / d,
+                    h: (ph - t - b) / d,
+                },
+                hotbar: Rect {
+                    x: (w - bw) / 2.0,
+                    y: h - bh,
+                    w: bw,
+                    h: bh,
+                },
+            }
+        })
+        .collect()
     }
 
     fn apart(a: &Rect, b: &Rect) -> bool {

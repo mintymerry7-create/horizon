@@ -998,6 +998,16 @@ impl wgpu::rwh::HasDisplayHandle for WindowDisplay {
         wgpu::rwh::HasDisplayHandle::display_handle(&*self.0)
     }
 }
+/// The size the window's surface fills. On iOS `inner_size` is the safe area,
+/// smaller than the view the Metal layer covers: drawn at that size the frame
+/// stretches over the whole screen and touches miss what they aim at.
+pub fn surface_size(window: &winit::window::Window) -> winit::dpi::PhysicalSize<u32> {
+    if cfg!(target_os = "ios") {
+        window.outer_size()
+    } else {
+        window.inner_size()
+    }
+}
 /// The backends to open a device on, each tried in turn until one gives a
 /// device. `api` is the player's choice (`GraphicsApi::with_env` applied);
 /// `os` is `std::env::consts::OS`; `wgpu_backend`: whether `WGPU_BACKEND` is set,
@@ -1442,7 +1452,7 @@ impl Renderer {
         };
         let info = adapter.get_info();
         crate::graphics::suggest_reduced_far_detail(crate::graphics::lod_capped(&info));
-        let size = window.inner_size();
+        let size = surface_size(&window);
         let max_side = device.limits().max_texture_dimension_2d;
         let (config, present_modes, hdr_output) = if let Some(surface) = &surface {
             let mut config = surface

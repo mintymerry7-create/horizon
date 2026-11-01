@@ -262,6 +262,12 @@ pub fn rows(level: Level) -> Vec<Row> {
             Row::Header("Display"),
             fov,
             fps,
+            // The FPS counter, near the top where it is easy to find.
+            h(
+                H::Overlay,
+                None,
+                "Frame rate and frame times over the game, with a graph.",
+            ),
             vsync,
             h(
                 H::ResolutionScale,
@@ -327,12 +333,6 @@ pub fn rows(level: Level) -> Vec<Row> {
                 H::UploadBudget,
                 Low,
                 "Mesh data sent to the GPU per frame. Lower is smoother while loading.",
-            ),
-            Row::Header("Overlay"),
-            h(
-                H::Overlay,
-                None,
-                "Frame rate and frame times over the game, with a graph.",
             ),
         ],
     };
