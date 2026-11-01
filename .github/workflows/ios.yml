@@ -8,6 +8,10 @@ on:
         description: Publish the IPA as the ios-latest prerelease
         type: boolean
         default: true
+      simulator:
+        description: Also run the game in the iOS Simulator (screenshots and logs)
+        type: boolean
+        default: false
   push:
     branches: ["**"]
     paths:
@@ -70,6 +74,8 @@ jobs:
   simulator:
     # The same game in the iOS Simulator: screenshots and logs of the missing-files screen, and with the
     # encrypted resources of the sim-data draft release, the title screen and a new world (ios/sim-test.sh).
+    # Only when asked: GitHub pauses a fork's workflows that use too many macOS minutes.
+    if: github.event_name == 'workflow_dispatch' && inputs.simulator
     runs-on: macos-15
     timeout-minutes: 180
     permissions:
